@@ -38,6 +38,11 @@ const fichaSchema = new mongoose.Schema({
   cidadeBatismo: String,
   ufBatismo: String,
   assinaturaBase64: String,
+  inscricaoBatismo: { type: Boolean, default: false },
+  inscricaoEucaristia: { type: Boolean, default: false },
+  inscricaoCrisma: { type: Boolean, default: false },
+  inscricaoPreCatequese: { type: Boolean, default: false },
+  etapa: String,
   isAtivo: { type: Boolean, default: true },
   usuarioId: String // Preparado para o sistema de Login futuro
 }, { timestamps: true });
