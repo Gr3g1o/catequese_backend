@@ -43,6 +43,11 @@ const fichaSchema = new mongoose.Schema({
   inscricaoCrisma: { type: Boolean, default: false },
   inscricaoPreCatequese: { type: Boolean, default: false },
   etapa: String,
+  status: { 
+    type: String, 
+    enum: ['ativo', 'pendente', 'arquivado', 'arquivado concluído'], 
+    default: 'ativo' 
+  },
   isAtivo: { type: Boolean, default: true },
   usuarioId: String // Preparado para o sistema de Login futuro
 }, { timestamps: true });
