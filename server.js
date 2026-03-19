@@ -64,6 +64,25 @@ app.get('/api/fichas', async (req, res) => {
   }
 });
 
+app.put('/api/fichas/:id', async (req, res) => {
+  try {
+    const fichaAtualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.status(200).json(fichaAtualizada);
+  } catch (erro) {
+    res.status(500).json({ erro: 'Erro ao atualizar a ficha' });
+  }
+});
+
+// Rota para INATIVAR (Soft Delete) uma ficha (PATCH)
+app.patch('/api/fichas/:id/inativar', async (req, res) => {
+  try {
+    await Ficha.findByIdAndUpdate(req.params.id, { isAtivo: false });
+    res.status(200).json({ mensagem: 'Ficha inativada com sucesso' });
+  } catch (erro) {
+    res.status(500).json({ erro: 'Erro ao inativar a ficha' });
+  }
+});
+
 // 4. Inicialização
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
