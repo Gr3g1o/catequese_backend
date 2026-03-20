@@ -14,7 +14,25 @@ const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 
 // 1. Conexão Banco de Dados
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ Banco de Dados Conectado!'))
+  .then(async () => {
+    console.log('✅ Banco de Dados Conectado!');
+    
+    // --- HACK: CRIADOR AUTOMÁTICO DE ADMIN ---
+    const adminExiste = await User.findOne({ username: 'admin' });
+    if (!adminExiste) {
+      const senhaCriptografada = await bcrypt.hash('sjoc1994', 10);
+      await User.create({
+        nome: 'Administrador Geral',
+        email: 'admin@catequese.local',
+        username: 'admin',
+        password: senhaCriptografada,
+        role: 'admin',
+        isAtivo: true
+      });
+      console.log('🎉 Usuário Admin criado com sucesso pelo Render!');
+    }
+    // -----------------------------------------
+  })
   .catch(err => console.error('❌ Erro no banco:', err));
 
 // 2. SCHEMAS
