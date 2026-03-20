@@ -16,7 +16,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Banco de Dados Conectado!'))
   .catch(err => console.error('❌ Erro no banco:', err));
-  .catch(err => console.error('❌ Erro no banco:', err));
 
 // 2. SCHEMAS
 const userSchema = new mongoose.Schema({
@@ -257,6 +256,33 @@ app.post('/api/admin/users', autenticar, async (req, res) => {
     res.status(201).json(novoUser);
   } catch (e) {
     res.status(400).json({ erro: 'Erro ao criar usuário interno' });
+  }
+// ATUALIZAR USUÁRIO (PUT)
+app.put('/api/admin/users/:id', autenticar, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+  try {
+    const { password, ...dados } = req.body;
+    
+    // Se enviou senha nova, criptografa. Se não, atualiza só os outros dados.
+    if (password && password.trim() !== '') {
+      dados.password = await bcrypt.hash(password, 10);
+    }
+    
+    const atualizado = await User.findByIdAndUpdate(req.params.id, dados, { new: true });
+    res.json(atualizado);
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao atualizar usuário' });
+  }
+});
+
+// DELETAR USUÁRIO (DELETE)
+app.delete('/api/admin/users/:id', autenticar, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ mensagem: 'Usuário deletado' });
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao deletar usuário' });
   }
 });
 
