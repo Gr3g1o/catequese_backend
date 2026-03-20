@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { Resend } = require('resend'); // Trocado nodemailer por Resend
+const nodemailer = require('nodemailer'); // Voltando para o Nodemailer
 
 const app = express();
 app.use(cors());
@@ -13,8 +13,16 @@ app.use(express.json({ limit: '10mb' }));
 // Configurações de Segurança
 const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 
-// --- CONFIGURAÇÃO DE E-MAIL (RESEND) ---
-const resend = new Resend(process.env.RESEND_API_KEY);
+// --- CONFIGURAÇÃO DE E-MAIL (BREVO) ---
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  secure: false, // TLS (padrão para porta 587)
+  auth: {
+    user: process.env.BREVO_USER, // Variável no Render (Seu e-mail de login no Brevo)
+    pass: process.env.BREVO_PASS  // Variável no Render (Sua chave SMTP)
+  }
+});
 
 // 1. Conexão Banco de Dados
 mongoose.connect(process.env.MONGODB_URI)
@@ -97,7 +105,7 @@ const autenticar = async (req, res, next) => {
 
 // 4. ROTAS DE AUTENTICAÇÃO
 
-// PASSO A: App pede para enviar um código para o e-mail (Via Resend)
+// PASSO A: App pede para enviar um código para o e-mail (Via Brevo)
 app.post('/api/auth/request-code', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ erro: 'E-mail é obrigatório' });
@@ -113,9 +121,10 @@ app.post('/api/auth/request-code', async (req, res) => {
     user.otpExpires = Date.now() + 10 * 60 * 1000; 
     await user.save();
 
-    // Chamada de envio do Resend
-    const { data, error } = await resend.emails.send({
-      from: 'Catequese <onboarding@resend.dev>', // Remetente padrão para testes
+    // Chamada de envio do Brevo/Nodemailer
+    const mailOptions = {
+      // ATENÇÃO: Coloque aqui o e-mail que você usou para criar a conta no Brevo
+      from: 'Catequese <sjocsuporte@gmail.com>', 
       to: email,
       subject: 'Seu código de acesso - Catequese',
       html: `
@@ -128,22 +137,18 @@ app.post('/api/auth/request-code', async (req, res) => {
           <small>Se você não solicitou este acesso, apenas ignore este e-mail.</small>
         </div>
       `
-    });
+    };
 
-    if (error) {
-      console.error('Erro Resend:', error);
-      return res.status(500).json({ erro: 'Falha ao processar e-mail' });
-    }
-
+    await transporter.sendMail(mailOptions);
     res.json({ mensagem: 'Código enviado com sucesso!' });
 
   } catch (e) {
-    console.error('Erro interno:', e);
-    res.status(500).json({ erro: 'Erro ao processar solicitação' });
+    console.error('Erro interno ao enviar e-mail:', e);
+    res.status(500).json({ erro: 'Erro ao processar solicitação de e-mail' });
   }
 });
 
-// PASSO B: Validação do Código (Inalterado)
+// PASSO B: Validação do Código
 app.post('/api/auth/verify-code', async (req, res) => {
   const { email, code } = req.body;
   try {
