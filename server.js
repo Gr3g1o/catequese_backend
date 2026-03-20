@@ -21,14 +21,14 @@ mongoose.connect(process.env.MONGODB_URI)
 const userSchema = new mongoose.Schema({
   nome: { type: String, default: 'Usuário' },
   email: { type: String, unique: true, required: true },
-  otp: { type: String }, 
+  otp: { type: String },
   otpExpires: { type: Date },
   username: { type: String, unique: true, sparse: true },
   password: { type: String },
-  role: { 
-    type: String, 
-    enum: ['user', 'superuser', 'admin'], 
-    default: 'user' 
+  role: {
+    type: String,
+    enum: ['user', 'superuser', 'admin'],
+    default: 'user'
   },
   isAtivo: { type: Boolean, default: true }
 }, { timestamps: true });
@@ -65,10 +65,10 @@ const fichaSchema = new mongoose.Schema({
   inscricaoCrisma: { type: Boolean, default: false },
   inscricaoPreCatequese: { type: Boolean, default: false },
   etapa: String,
-  status: { 
-    type: String, 
-    enum: ['ativo', 'pendente', 'arquivado', 'arquivado concluído'], 
-    default: 'pendente' 
+  status: {
+    type: String,
+    enum: ['ativo', 'pendente', 'arquivado', 'arquivado concluído'],
+    default: 'pendente'
   },
   isAtivo: { type: Boolean, default: true },
   criadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
@@ -106,7 +106,7 @@ app.post('/api/auth/request-code', async (req, res) => {
 
     const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp = codigoOTP;
-    user.otpExpires = Date.now() + 10 * 60 * 1000; 
+    user.otpExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
     // Chamada Web direta (HTTP) para a API do Brevo
@@ -257,35 +257,35 @@ app.post('/api/admin/users', autenticar, async (req, res) => {
   } catch (e) {
     res.status(400).json({ erro: 'Erro ao criar usuário interno' });
   }
-// ATUALIZAR USUÁRIO (PUT)
-app.put('/api/admin/users/:id', autenticar, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
-  try {
-    const { password, ...dados } = req.body;
-    
-    // Se enviou senha nova, criptografa. Se não, atualiza só os outros dados.
-    if (password && password.trim() !== '') {
-      dados.password = await bcrypt.hash(password, 10);
-    }
-    
-    const atualizado = await User.findByIdAndUpdate(req.params.id, dados, { new: true });
-    res.json(atualizado);
-  } catch (e) {
-    res.status(500).json({ erro: 'Erro ao atualizar usuário' });
-  }
-});
+  // ATUALIZAR USUÁRIO (PUT)
+  app.put('/api/admin/users/:id', autenticar, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+    try {
+      const { password, ...dados } = req.body;
 
-// DELETAR USUÁRIO (DELETE)
-app.delete('/api/admin/users/:id', autenticar, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
-  try {
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ mensagem: 'Usuário deletado' });
-  } catch (e) {
-    res.status(500).json({ erro: 'Erro ao deletar usuário' });
-  }
+      // Se enviou senha nova, criptografa. Se não, atualiza só os outros dados.
+      if (password && password.trim() !== '') {
+        dados.password = await bcrypt.hash(password, 10);
+      }
+
+      const atualizado = await User.findByIdAndUpdate(req.params.id, dados, { new: true });
+      res.json(atualizado);
+    } catch (e) {
+      res.status(500).json({ erro: 'Erro ao atualizar usuário' });
+    }
+  });
+
+  // DELETAR USUÁRIO (DELETE)
+  app.delete('/api/admin/users/:id', autenticar, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+    try {
+      await User.findByIdAndDelete(req.params.id);
+      res.json({ mensagem: 'Usuário deletado' });
+    } catch (e) {
+      res.status(500).json({ erro: 'Erro ao deletar usuário' });
+    }
+  });
 });
-});
-// 7. INICIALIZAÇÃO
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
+  // 7. INICIALIZAÇÃO
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
