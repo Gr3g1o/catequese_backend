@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer'); // Nova biblioteca de e-mail
+const { Resend } = require('resend'); // Trocado nodemailer por Resend
 
 const app = express();
 app.use(cors());
@@ -13,19 +13,8 @@ app.use(express.json({ limit: '10mb' }));
 // Configurações de Segurança
 const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 
-// --- CONFIGURAÇÃO DE E-MAIL (NODEMAILER) ---
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // false para a porta 587
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
+// --- CONFIGURAÇÃO DE E-MAIL (RESEND) ---
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // 1. Conexão Banco de Dados
 mongoose.connect(process.env.MONGODB_URI)
@@ -33,18 +22,13 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => console.error('❌ Erro no banco:', err));
 
 // 2. SCHEMAS
-
-// Schema de Usuário (Atualizado para o Código Mágico)
 const userSchema = new mongoose.Schema({
   nome: { type: String, default: 'Usuário' },
   email: { type: String, unique: true, required: true },
-  
-  // Campos para o código por e-mail
   otp: { type: String }, 
   otpExpires: { type: Date },
-
-  username: { type: String, unique: true, sparse: true }, // Apenas para SuperUser/Admin
-  password: { type: String }, // Apenas para SuperUser/Admin
+  username: { type: String, unique: true, sparse: true },
+  password: { type: String },
   role: { 
     type: String, 
     enum: ['user', 'superuser', 'admin'], 
@@ -55,7 +39,6 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Schema da Ficha
 const fichaSchema = new mongoose.Schema({
   nome: { type: String, required: true },
   dataNascimento: String,
@@ -114,68 +97,73 @@ const autenticar = async (req, res, next) => {
 
 // 4. ROTAS DE AUTENTICAÇÃO
 
-// PASSO A: App pede para enviar um código para o e-mail
+// PASSO A: App pede para enviar um código para o e-mail (Via Resend)
 app.post('/api/auth/request-code', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ erro: 'E-mail é obrigatório' });
 
   try {
-    // Procura o usuário ou cria um novo se não existir
     let user = await User.findOne({ email });
     if (!user) {
       user = new User({ email, role: 'user' });
     }
 
-    // Gera um código de 6 dígitos
     const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Salva o código com validade de 10 minutos
     user.otp = codigoOTP;
     user.otpExpires = Date.now() + 10 * 60 * 1000; 
     await user.save();
 
-    // Envia o e-mail
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    // Chamada de envio do Resend
+    const { data, error } = await resend.emails.send({
+      from: 'Catequese <onboarding@resend.dev>', // Remetente padrão para testes
       to: email,
       subject: 'Seu código de acesso - Catequese',
-      text: `Olá!\n\nSeu código de acesso ao App da Catequese é: ${codigoOTP}\n\nEste código expira em 10 minutos. Se você não solicitou este acesso, apenas ignore este e-mail.`
-    };
+      html: `
+        <div style="font-family: sans-serif; color: #333;">
+          <h2>Olá!</h2>
+          <p>Seu código de acesso ao App da Catequese é:</p>
+          <h1 style="color: #0D47A1; letter-spacing: 5px;">${codigoOTP}</h1>
+          <p>Este código expira em 10 minutos.</p>
+          <hr />
+          <small>Se você não solicitou este acesso, apenas ignore este e-mail.</small>
+        </div>
+      `
+    });
 
-    await transporter.sendMail(mailOptions);
+    if (error) {
+      console.error('Erro Resend:', error);
+      return res.status(500).json({ erro: 'Falha ao processar e-mail' });
+    }
+
     res.json({ mensagem: 'Código enviado com sucesso!' });
 
   } catch (e) {
-    console.error('Erro ao enviar e-mail:', e);
-    res.status(500).json({ erro: 'Erro ao enviar o código por e-mail' });
+    console.error('Erro interno:', e);
+    res.status(500).json({ erro: 'Erro ao processar solicitação' });
   }
 });
 
-// PASSO B: App envia o código para validação e pega o Token
+// PASSO B: Validação do Código (Inalterado)
 app.post('/api/auth/verify-code', async (req, res) => {
   const { email, code } = req.body;
   try {
     const user = await User.findOne({ email });
-
-    // Verifica se usuário existe, se o código bate e se não expirou
     if (!user || user.otp !== code || user.otpExpires < Date.now()) {
       return res.status(401).json({ erro: 'Código inválido ou expirado.' });
     }
 
-    // Código válido! Limpa o OTP por segurança e gera o Token
     user.otp = null;
     user.otpExpires = null;
     await user.save();
 
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
     res.json({ token, user });
-
   } catch (e) {
     res.status(500).json({ erro: 'Erro ao validar o código' });
   }
 });
 
-// Login via Usuário/Senha (Destinado a 'superuser' e 'admin')
+// Login Interno (Admin/Superuser)
 app.post('/api/auth/internal', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -190,8 +178,7 @@ app.post('/api/auth/internal', async (req, res) => {
   }
 });
 
-// 5. ROTAS DE FICHAS (COM PROTEÇÃO)
-
+// 5. ROTAS DE FICHAS
 app.post('/api/fichas', autenticar, async (req, res) => {
   try {
     if (req.user.role === 'user') {
@@ -199,7 +186,6 @@ app.post('/api/fichas', autenticar, async (req, res) => {
       if (count >= 1) return res.status(403).json({ erro: 'Limite de 1 ficha atingido por usuário.' });
       req.body.status = 'pendente';
     }
-
     const novaFicha = new Ficha({ ...req.body, criadoPor: req.user._id });
     await novaFicha.save();
     res.status(201).json(novaFicha);
@@ -211,14 +197,8 @@ app.post('/api/fichas', autenticar, async (req, res) => {
 app.get('/api/fichas', autenticar, async (req, res) => {
   try {
     let filtro = { isAtivo: true };
-    
-    if (req.user.role === 'user') {
-      filtro.criadoPor = req.user._id;
-    }
-
-    if (req.user.role === 'admin' && req.query.incluirInativos === 'true') {
-      delete filtro.isAtivo;
-    }
+    if (req.user.role === 'user') filtro.criadoPor = req.user._id;
+    if (req.user.role === 'admin' && req.query.incluirInativos === 'true') delete filtro.isAtivo;
 
     const fichas = await Ficha.find(filtro).sort({ nome: 1 });
     res.status(200).json(fichas);
@@ -231,11 +211,9 @@ app.put('/api/fichas/:id', autenticar, async (req, res) => {
   try {
     const ficha = await Ficha.findById(req.params.id);
     if (!ficha) return res.status(404).json({ erro: 'Ficha não encontrada' });
-
     if (req.user.role === 'user' && ficha.criadoPor.toString() !== req.user._id.toString()) {
       return res.status(403).json({ erro: 'Você não tem permissão para editar esta ficha' });
     }
-
     const atualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(atualizada);
   } catch (e) {
@@ -243,17 +221,9 @@ app.put('/api/fichas/:id', autenticar, async (req, res) => {
   }
 });
 
-// Rota para INATIVAR (Soft Delete) uma ficha (PATCH)
 app.patch('/api/fichas/:id/inativar', autenticar, async (req, res) => {
   try {
-    const ficha = await Ficha.findById(req.params.id);
-    if (!ficha) return res.status(404).json({ erro: 'Ficha não encontrada' });
-    
-    // Impede o 'user' comum de deletar
-    if (req.user.role === 'user') {
-      return res.status(403).json({ erro: 'Acesso negado' });
-    }
-
+    if (req.user.role === 'user') return res.status(403).json({ erro: 'Acesso negado' });
     await Ficha.findByIdAndUpdate(req.params.id, { isAtivo: false });
     res.status(200).json({ mensagem: 'Ficha inativada com sucesso' });
   } catch (erro) {
@@ -261,8 +231,7 @@ app.patch('/api/fichas/:id/inativar', autenticar, async (req, res) => {
   }
 });
 
-// 6. ROTAS DE ADMINISTRAÇÃO (CRUD DE USUÁRIOS)
-
+// 6. ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', autenticar, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
   const users = await User.find().sort({ nome: 1 });
