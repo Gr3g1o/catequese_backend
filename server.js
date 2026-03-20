@@ -16,21 +16,14 @@ const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 // --- CONFIGURAÇÃO DE E-MAIL (NODEMAILER) ---
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // SSL/TLS
+  port: 587,
+  secure: false, // false para a porta 587
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
-  // Ajustes cruciais para evitar Timeout em ambientes de nuvem (Render)
-  connectionTimeout: 20000, // 20 segundos para conectar
-  greetingTimeout: 20000,   // 20 segundos para o "Oi" do Gmail
-  socketTimeout: 30000,     // 30 segundos de espera no total
-  pool: true,               // Usa um pool de conexões (mais estável)
-  maxConnections: 1,        // Uma por vez para não ser bloqueado
   tls: {
-    rejectUnauthorized: false,
-    minVersion: 'TLSv1.2'   // Garante versão moderna de segurança
+    rejectUnauthorized: false
   }
 });
 
