@@ -285,7 +285,7 @@ app.delete('/api/admin/users/:id', autenticar, async (req, res) => {
     res.status(500).json({ erro: 'Erro ao deletar usuário' });
   }
 });
-
+});
 // 7. INICIALIZAÇÃO
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
