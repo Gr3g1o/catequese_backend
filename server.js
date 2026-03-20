@@ -4,7 +4,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer'); // Voltando para o Nodemailer
 
 const app = express();
 app.use(cors());
@@ -12,17 +11,6 @@ app.use(express.json({ limit: '10mb' }));
 
 // Configurações de Segurança
 const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
-
-// --- CONFIGURAÇÃO DE E-MAIL (BREVO) ---
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  secure: false, // TLS (padrão para porta 587)
-  auth: {
-    user: process.env.BREVO_USER, // Variável no Render (Seu e-mail de login no Brevo)
-    pass: process.env.BREVO_PASS  // Variável no Render (Sua chave SMTP)
-  }
-});
 
 // 1. Conexão Banco de Dados
 mongoose.connect(process.env.MONGODB_URI)
@@ -105,7 +93,7 @@ const autenticar = async (req, res, next) => {
 
 // 4. ROTAS DE AUTENTICAÇÃO
 
-// PASSO A: App pede para enviar um código para o e-mail (Via Brevo)
+// PASSO A: App pede para enviar código via API REST do Brevo (Driblando o bloqueio do Render)
 app.post('/api/auth/request-code', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ erro: 'E-mail é obrigatório' });
@@ -121,25 +109,40 @@ app.post('/api/auth/request-code', async (req, res) => {
     user.otpExpires = Date.now() + 10 * 60 * 1000; 
     await user.save();
 
-    // Chamada de envio do Brevo/Nodemailer
-    const mailOptions = {
-      // ATENÇÃO: Coloque aqui o e-mail que você usou para criar a conta no Brevo
-      from: 'Catequese <sjocsuporte@gmail.com>', 
-      to: email,
-      subject: 'Seu código de acesso - Catequese',
-      html: `
-        <div style="font-family: sans-serif; color: #333;">
-          <h2>Olá!</h2>
-          <p>Seu código de acesso ao App da Catequese é:</p>
-          <h1 style="color: #0D47A1; letter-spacing: 5px;">${codigoOTP}</h1>
-          <p>Este código expira em 10 minutos.</p>
-          <hr />
-          <small>Se você não solicitou este acesso, apenas ignore este e-mail.</small>
-        </div>
-      `
-    };
+    // Chamada Web direta (HTTP) para a API do Brevo
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        sender: {
+          name: 'App Catequese',
+          email: 'sjocsuporte@gmail.com' // Seu e-mail autorizado no Brevo
+        },
+        to: [{ email: email }],
+        subject: 'Seu código de acesso - Catequese',
+        htmlContent: `
+          <div style="font-family: sans-serif; color: #333;">
+            <h2>Olá!</h2>
+            <p>Seu código de acesso ao App da Catequese é:</p>
+            <h1 style="color: #0D47A1; letter-spacing: 5px;">${codigoOTP}</h1>
+            <p>Este código expira em 10 minutos.</p>
+            <hr />
+            <small>Se você não solicitou este acesso, apenas ignore este e-mail.</small>
+          </div>
+        `
+      })
+    });
 
-    await transporter.sendMail(mailOptions);
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Erro API Brevo:', errorData);
+      return res.status(500).json({ erro: 'Falha do Brevo ao enviar e-mail' });
+    }
+
     res.json({ mensagem: 'Código enviado com sucesso!' });
 
   } catch (e) {
