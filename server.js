@@ -11,14 +11,20 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Configurações de Segurança
-const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia_123';
+const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 
 // --- CONFIGURAÇÃO DE E-MAIL (NODEMAILER) ---
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // true para a porta 465 (SSL/TLS)
   auth: {
-    user: process.env.EMAIL_USER, // Variável no Render (ex: paroquia@gmail.com)
-    pass: process.env.EMAIL_PASS  // Variável no Render (Senha de App do Google)
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  tls: {
+    // Não falha se o servidor tiver um certificado um pouco diferente
+    rejectUnauthorized: false 
   }
 });
 
