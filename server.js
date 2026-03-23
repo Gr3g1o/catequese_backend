@@ -316,3 +316,19 @@ app.delete('/api/admin/users/:id', autenticar, async (req, res) => {
 // 8. INICIALIZAÇÃO
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
+
+// DELETAR FICHA (Apenas Admin)
+app.delete('/api/fichas/:id', autenticar, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ erro: 'Apenas administradores podem deletar fichas permanentemente' });
+    }
+    const fichaDeletada = await Ficha.findByIdAndDelete(req.params.id);
+    if (!fichaDeletada) {
+      return res.status(404).json({ erro: 'Ficha não encontrada' });
+    }
+    res.json({ mensagem: 'Ficha deletada com sucesso' });
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao deletar ficha' });
+  }
+});
