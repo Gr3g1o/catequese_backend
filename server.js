@@ -238,15 +238,75 @@ app.get('/api/fichas', autenticar, async (req, res) => {
 
 app.put('/api/fichas/:id', autenticar, async (req, res) => {
   try {
-    const ficha = await Ficha.findById(req.params.id);
-    if (!ficha) return res.status(404).json({ erro: 'Ficha não encontrada' });
-    if (req.user.role === 'user' && ficha.criadoPor.toString() !== req.user._id.toString()) {
+    // 1. Puxamos a ficha antiga e populamos os dados do dono (User) para ter o e-mail dele
+    const fichaAntiga = await Ficha.findById(req.params.id).populate('criadoPor');
+    if (!fichaAntiga) return res.status(404).json({ erro: 'Ficha não encontrada' });
+
+    // 2. Trava de segurança para o usuário comum
+    if (req.user.role === 'user' && fichaAntiga.criadoPor._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ erro: 'Sem permissão' });
     }
-    const atualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true });
+
+    // 3. Atualizamos a ficha no banco
+    const atualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('criadoPor');
+
+    // --- LÓGICA DE NOTIFICAÇÃO POR E-MAIL ---
+    // Só envia e-mail se quem estiver alterando NÃO for o dono da ficha (ou seja, é admin/superuser)
+    if (req.user.role !== 'user' && atualizada.criadoPor && atualizada.criadoPor.email) {
+      const statusMudou = fichaAntiga.status !== atualizada.status;
+      const inatividadeMudou = fichaAntiga.isAtivo !== atualizada.isAtivo;
+
+      // Se ocorreu alguma mudança importante, monta a mensagem
+      if (statusMudou || inatividadeMudou) {
+        let mensagemStatus = '';
+        if (inatividadeMudou) {
+          mensagemStatus = atualizada.isAtivo ? 'foi reativada' : 'foi inativada';
+        } else if (statusMudou) {
+          mensagemStatus = `teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`;
+        }
+
+        // 4. Dispara o e-mail via Brevo (sem await, para não travar a tela do app enquanto envia)
+        fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'api-key': process.env.BREVO_API_KEY,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            sender: { name: 'App Catequese', email: 'sjocsuporte@gmail.com' },
+            to: [{ email: atualizada.criadoPor.email }],
+            subject: 'Atualização na Ficha - Catequese',
+            htmlContent: `
+              <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                <div style="background-color: #0D47A1; padding: 20px; text-align: center;">
+                  <h2 style="color: white; margin: 0;">App Catequese</h2>
+                </div>
+                <div style="padding: 20px;">
+                  <h3 style="color: #0D47A1;">Olá, ${atualizada.criadoPor.nome}!</h3>
+                  <p>A ficha pastoral do catequizando <b>${atualizada.nome}</b> acabou de ser analisada.</p>
+                  <p style="font-size: 16px; padding: 10px; background-color: #f5f5f5; border-left: 4px solid #0D47A1;">
+                    A ficha <b>${mensagemStatus}</b>.
+                  </p>
+                  <p>Abra o aplicativo no seu celular para visualizar os detalhes completos e o nome do(a) catequista responsável.</p>
+                  <br/>
+                  <p>Fique com Deus,</p>
+                  <p><b>Equipe da Paróquia São José Operário</b></p>
+                </div>
+                <div style="background-color: #f1f1f1; padding: 10px; text-align: center; font-size: 12px; color: #777;">
+                  Este é um e-mail automático. Por favor, não responda.
+                </div>
+              </div>
+            `
+          })
+        }).catch(err => console.error('Falha no envio do e-mail de atualização:', err));
+      }
+    }
+
     res.json(atualizada);
   } catch (e) {
-    res.status(500).json({ erro: 'Erro ao atualizar' });
+    console.error(e);
+    res.status(500).json({ erro: 'Erro ao atualizar ficha' });
   }
 });
 
