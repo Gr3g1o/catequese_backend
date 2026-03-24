@@ -348,7 +348,7 @@ app.delete('/api/fichas/:id', autenticar, async (req, res) => {
 
 // 7. ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', autenticar, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+  if (req.user.role === 'user') return res.status(403).json({ erro: 'Acesso restrito' });
   
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 0;
