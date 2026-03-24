@@ -99,7 +99,7 @@ app.post('/api/auth/request-code', async (req, res) => {
   try {
     let user = await User.findOne({ email });
     if (!user) {
-      user = new User({ email, role: 'user' }); // Nome padrão será 'Usuário'
+      user = new User({ email, role: 'user' }); 
     }
 
     const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
@@ -170,7 +170,7 @@ app.post('/api/auth/internal', async (req, res) => {
   }
 });
 
-// 5. ROTAS DO MEU PERFIL (NOVO)
+// 5. ROTAS DO MEU PERFIL
 app.get('/api/users/me', autenticar, async (req, res) => {
   res.json(req.user);
 });
@@ -198,7 +198,7 @@ app.patch('/api/users/me/inativar', autenticar, async (req, res) => {
   }
 });
 
-// 6. ROTAS DE FICHAS (Com suporte a Paginação)
+// 6. ROTAS DE FICHAS 
 app.post('/api/fichas', autenticar, async (req, res) => {
   try {
     if (req.user.role === 'user') {
@@ -220,9 +220,8 @@ app.get('/api/fichas', autenticar, async (req, res) => {
     if (req.user.role === 'user') filtro.criadoPor = req.user._id;
     if (req.user.role === 'admin' && req.query.incluirInativos === 'true') delete filtro.isAtivo;
 
-    // Configuração de Paginação
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 0; // 0 traz tudo
+    const limit = parseInt(req.query.limit) || 0; 
     const skip = (page - 1) * limit;
 
     const fichas = await Ficha.find(filtro)
@@ -236,36 +235,47 @@ app.get('/api/fichas', autenticar, async (req, res) => {
   }
 });
 
+// ROTA DE ATUALIZAÇÃO DE FICHA COM CORREÇÃO DE BUGS E NOTIFICAÇÃO
 app.put('/api/fichas/:id', autenticar, async (req, res) => {
   try {
-    // 1. Puxamos a ficha antiga e populamos os dados do dono (User) para ter o e-mail dele
+    // Puxamos a ficha antiga e populamos os dados do dono
     const fichaAntiga = await Ficha.findById(req.params.id).populate('criadoPor');
     if (!fichaAntiga) return res.status(404).json({ erro: 'Ficha não encontrada' });
 
-    // 2. Trava de segurança para o usuário comum
+    // Trava de segurança para o usuário comum
     if (req.user.role === 'user' && fichaAntiga.criadoPor._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ erro: 'Sem permissão' });
     }
 
-    // 3. Atualizamos a ficha no banco
+    // --- ESCUDO DE SEGURANÇA (CORREÇÃO DOS BUGS) ---
+    // Impede que as edições do "user" alterem o status ou a inatividade da ficha
+    if (req.user.role === 'user') {
+      delete req.body.status;
+      delete req.body.isAtivo;
+    }
+
+    // Atualizamos a ficha no banco
     const atualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('criadoPor');
 
     // --- LÓGICA DE NOTIFICAÇÃO POR E-MAIL ---
-    // Só envia e-mail se quem estiver alterando NÃO for o dono da ficha (ou seja, é admin/superuser)
     if (req.user.role !== 'user' && atualizada.criadoPor && atualizada.criadoPor.email) {
       const statusMudou = fichaAntiga.status !== atualizada.status;
       const inatividadeMudou = fichaAntiga.isAtivo !== atualizada.isAtivo;
 
-      // Se ocorreu alguma mudança importante, monta a mensagem
       if (statusMudou || inatividadeMudou) {
         let mensagemStatus = '';
-        if (inatividadeMudou) {
-          mensagemStatus = atualizada.isAtivo ? 'foi reativada' : 'foi inativada';
+        
+        if (statusMudou && inatividadeMudou) {
+           mensagemStatus = atualizada.isAtivo 
+             ? `foi reativada e teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`
+             : `foi inativada e teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`;
         } else if (statusMudou) {
           mensagemStatus = `teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`;
+        } else if (inatividadeMudou) {
+          mensagemStatus = atualizada.isAtivo ? 'foi reativada' : 'foi inativada temporariamente';
         }
 
-        // 4. Dispara o e-mail via Brevo (sem await, para não travar a tela do app enquanto envia)
+        // Dispara o e-mail via Brevo em segundo plano
         fetch('https://api.brevo.com/v3/smtp/email', {
           method: 'POST',
           headers: {
@@ -284,11 +294,11 @@ app.put('/api/fichas/:id', autenticar, async (req, res) => {
                 </div>
                 <div style="padding: 20px;">
                   <h3 style="color: #0D47A1;">Olá, ${atualizada.criadoPor.nome}!</h3>
-                  <p>A ficha pastoral do catequizando <b>${atualizada.nome}</b> acabou de ser analisada.</p>
+                  <p>A ficha pastoral do catequizando <b>${atualizada.nome}</b> acabou de ser atualizada.</p>
                   <p style="font-size: 16px; padding: 10px; background-color: #f5f5f5; border-left: 4px solid #0D47A1;">
                     A ficha <b>${mensagemStatus}</b>.
                   </p>
-                  <p>Abra o aplicativo no seu celular para visualizar os detalhes completos e o nome do(a) catequista responsável.</p>
+                  <p>Abra o aplicativo para visualizar os detalhes completos.</p>
                   <br/>
                   <p>Fique com Deus,</p>
                   <p><b>Equipe da Paróquia São José Operário</b></p>
@@ -336,7 +346,7 @@ app.delete('/api/fichas/:id', autenticar, async (req, res) => {
   }
 });
 
-// 7. ROTAS DE ADMINISTRAÇÃO (Com suporte a Paginação e Correção de Escopo)
+// 7. ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', autenticar, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
   
