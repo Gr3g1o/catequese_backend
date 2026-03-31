@@ -116,13 +116,17 @@ const autenticar = async (req, res, next) => {
 };
 
 // 4. ROTAS DE AUTENTICAÇÃO
-// Limita a 3 tentativas de pedido de código por IP a cada 15 minutos
+// Limita a 3 tentativas de pedido de código POR E-MAIL a cada 15 minutos
 const bloqueadorDeSpamEmail = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 3,
   message: { erro: 'Muitas tentativas de envio. Por favor, aguarde 15 minutos para tentar novamente.' },
   standardHeaders: true,
   legacyHeaders: false,
+  // O limitador vai olhar o E-MAIL que a pessoa digitou, ou o IP se não houver e-mail
+  keyGenerator: (req, res) => {
+    return req.body.email ? req.body.email.toLowerCase().trim() : req.ip;
+  }
 });
 
 // Note que adicionamos o "bloqueadorDeSpamEmail" no meio da rota
