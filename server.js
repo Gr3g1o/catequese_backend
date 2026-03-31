@@ -123,9 +123,9 @@ const bloqueadorDeSpamEmail = rateLimit({
   message: { erro: 'Muitas tentativas de envio. Por favor, aguarde 15 minutos para tentar novamente.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // O limitador vai olhar o E-MAIL que a pessoa digitou, ou o IP se não houver e-mail
+  // A correção: retiramos o 'req.ip' para evitar o erro de segurança do IPv6
   keyGenerator: (req, res) => {
-    return req.body.email ? req.body.email.toLowerCase().trim() : req.ip;
+    return req.body.email ? req.body.email.toLowerCase().trim() : 'sem-email';
   }
 });
 
