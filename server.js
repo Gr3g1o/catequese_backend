@@ -7,24 +7,29 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
-// --- CORREÇÃO PARA O RATE LIMIT FUNCIONAR NO RENDER ---
+
+// --- 1. CORREÇÃO PARA O RATE LIMIT FUNCIONAR NO RENDER ---
+app.set('trust proxy', 1);
+
+// --- 2. CORS CORRIGIDO E MAIS INTELIGENTE ---
 const dominiosPermitidos = [
-  'https://catequese-app-web.onrender.com', // Substitua pelo link real do seu app web
-  'http://localhost:3000', // Para testes locais do servidor
-  'http://localhost:8080'  // Para testes locais do Flutter Web
+  'https://catequese-app-web.onrender.com', // Link real do seu app web
+  'https://catequese-app-web.onrender.com/' // Variação com barra no final
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Se a origem for nula (como aplicativos de celular Android/iOS) 
-    // ou estiver na nossa lista de permitidos, liberamos o acesso.
-    if (!origin || dominiosPermitidos.includes(origin)) {
+    // Libera se for celular (!origin), se for teste local (localhost) ou se for o site do Render
+    if (!origin || origin.startsWith('http://localhost') || dominiosPermitidos.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Bloqueado pelo CORS: Origem não autorizada.'));
     }
   }
 }));
+
+// --- 3. A LINHA QUE HAVIA SUMIDO (VITAL PARA LER OS DADOS DO APP) ---
+app.use(express.json({ limit: '10mb' }));
 
 // Configurações de Segurança
 const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
@@ -119,6 +124,7 @@ const bloqueadorDeSpamEmail = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
 // Note que adicionamos o "bloqueadorDeSpamEmail" no meio da rota
 app.post('/api/auth/request-code', bloqueadorDeSpamEmail, async (req, res) => {
   const { email } = req.body;
