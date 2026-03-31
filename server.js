@@ -4,10 +4,26 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+const dominiosPermitidos = [
+  'https://catequese-app-web.onrender.com', // Substitua pelo link real do seu app web
+  'http://localhost:3000', // Para testes locais do servidor
+  'http://localhost:8080'  // Para testes locais do Flutter Web
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Se a origem for nula (como aplicativos de celular Android/iOS) 
+    // ou estiver na nossa lista de permitidos, liberamos o acesso.
+    if (!origin || dominiosPermitidos.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Bloqueado pelo CORS: Origem não autorizada.'));
+    }
+  }
+}));
 
 // Configurações de Segurança
 const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
@@ -94,7 +110,16 @@ const autenticar = async (req, res, next) => {
 };
 
 // 4. ROTAS DE AUTENTICAÇÃO
-app.post('/api/auth/request-code', async (req, res) => {
+// Limita a 3 tentativas de pedido de código por IP a cada 15 minutos
+const bloqueadorDeSpamEmail = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 3,
+  message: { erro: 'Muitas tentativas de envio. Por favor, aguarde 15 minutos para tentar novamente.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+// Note que adicionamos o "bloqueadorDeSpamEmail" no meio da rota
+app.post('/api/auth/request-code', bloqueadorDeSpamEmail, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ erro: 'E-mail é obrigatório' });
 
