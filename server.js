@@ -8,7 +8,6 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 // --- CORREÇÃO PARA O RATE LIMIT FUNCIONAR NO RENDER ---
-app.set('trust proxy', 1);
 const dominiosPermitidos = [
   'https://catequese-app-web.onrender.com', // Substitua pelo link real do seu app web
   'http://localhost:3000', // Para testes locais do servidor
