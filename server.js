@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Configurações de Segurança
-const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia_123';
+const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_paroquia';
 
 // 1. Conexão Banco de Dados
 mongoose.connect(process.env.MONGODB_URI)
@@ -18,25 +18,23 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => console.error('❌ Erro no banco:', err));
 
 // 2. SCHEMAS
-
-// Schema de Usuário
 const userSchema = new mongoose.Schema({
-  nome: { type: String, required: true },
+  nome: { type: String, default: 'Usuário' },
   email: { type: String, unique: true, required: true },
-  uid: String, // Para GoogleID ou AppleID
-  username: { type: String, unique: true, sparse: true }, // Apenas para SuperUser/Admin
-  password: { type: String }, // Apenas para SuperUser/Admin
-  role: { 
-    type: String, 
-    enum: ['user', 'superuser', 'admin'], 
-    default: 'user' 
+  otp: { type: String },
+  otpExpires: { type: Date },
+  username: { type: String, unique: true, sparse: true },
+  password: { type: String },
+  role: {
+    type: String,
+    enum: ['user', 'superuser', 'admin'],
+    default: 'user'
   },
   isAtivo: { type: Boolean, default: true }
 }, { timestamps: true });
 
 const User = mongoose.model('User', userSchema);
 
-// Schema da Ficha (Atualizado com criadoPor)
 const fichaSchema = new mongoose.Schema({
   nome: { type: String, required: true },
   dataNascimento: String,
@@ -66,14 +64,16 @@ const fichaSchema = new mongoose.Schema({
   inscricaoEucaristia: { type: Boolean, default: false },
   inscricaoCrisma: { type: Boolean, default: false },
   inscricaoPreCatequese: { type: Boolean, default: false },
+  inscricaoNoivos: { type: Boolean, default: false },
+  inscricaoAdultos: { type: Boolean, default: false },
   etapa: String,
-  status: { 
-    type: String, 
-    enum: ['ativo', 'pendente', 'arquivado', 'arquivado concluído'], 
-    default: 'pendente' // Padrão agora é pendente para novos cadastros
+  status: {
+    type: String,
+    enum: ['ativo', 'pendente', 'arquivado', 'arquivado concluído'],
+    default: 'pendente'
   },
   isAtivo: { type: Boolean, default: true },
-  criadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' } // Link com quem criou
+  criadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 
 const Ficha = mongoose.model('Ficha', fichaSchema);
@@ -94,24 +94,70 @@ const autenticar = async (req, res, next) => {
 };
 
 // 4. ROTAS DE AUTENTICAÇÃO
+app.post('/api/auth/request-code', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ erro: 'E-mail é obrigatório' });
 
-// Login/Cadastro via Google ou Apple (Destinado a 'user')
-app.post('/api/auth/external', async (req, res) => {
-  const { nome, email, uid } = req.body;
   try {
     let user = await User.findOne({ email });
     if (!user) {
-      user = new User({ nome, email, uid, role: 'user' });
-      await user.save();
+      user = new User({ email, role: 'user' });
     }
-    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
-    res.json({ token, user });
+
+    const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
+    user.otp = codigoOTP;
+    user.otpExpires = Date.now() + 10 * 60 * 1000;
+    await user.save();
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        sender: { name: 'App Catequese', email: 'sjocsuporte@gmail.com' },
+        to: [{ email: email }],
+        subject: 'Seu código de acesso - Catequese',
+        htmlContent: `
+          <div style="font-family: sans-serif; color: #333;">
+            <h2>Olá!</h2>
+            <p>Seu código de acesso ao App da Catequese é:</p>
+            <h1 style="color: #0D47A1; letter-spacing: 5px;">${codigoOTP}</h1>
+            <p>Este código expira em 10 minutos.</p>
+            <hr />
+            <small>Se você não solicitou este acesso, ignore este e-mail.</small>
+          </div>
+        `
+      })
+    });
+
+    if (!response.ok) return res.status(500).json({ erro: 'Falha do Brevo ao enviar e-mail' });
+    res.json({ mensagem: 'Código enviado com sucesso!' });
+
   } catch (e) {
-    res.status(500).json({ erro: 'Erro no login externo' });
+    res.status(500).json({ erro: 'Erro ao processar solicitação de e-mail' });
   }
 });
 
-// Login via Usuário/Senha (Destinado a 'superuser' e 'admin')
+app.post('/api/auth/verify-code', async (req, res) => {
+  const { email, code } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user || user.otp !== code || user.otpExpires < Date.now()) {
+      return res.status(401).json({ erro: 'Código inválido ou expirado.' });
+    }
+    user.otp = null;
+    user.otpExpires = null;
+    await user.save();
+    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
+    res.json({ token, user });
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao validar o código' });
+  }
+});
+
 app.post('/api/auth/internal', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -126,17 +172,42 @@ app.post('/api/auth/internal', async (req, res) => {
   }
 });
 
-// 5. ROTAS DE FICHAS (COM PROTEÇÃO)
+// 5. ROTAS DO MEU PERFIL
+app.get('/api/users/me', autenticar, async (req, res) => {
+  res.json(req.user);
+});
 
+app.put('/api/users/me', autenticar, async (req, res) => {
+  try {
+    const { nome, email } = req.body;
+    const atualizado = await User.findByIdAndUpdate(
+      req.user._id,
+      { nome, email },
+      { new: true }
+    );
+    res.json(atualizado);
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao atualizar perfil' });
+  }
+});
+
+app.patch('/api/users/me/inativar', autenticar, async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.user._id, { isAtivo: false });
+    res.json({ mensagem: 'Conta inativada com sucesso' });
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao inativar conta' });
+  }
+});
+
+// 6. ROTAS DE FICHAS 
 app.post('/api/fichas', autenticar, async (req, res) => {
   try {
-    // Regra: 'user' comum só pode criar 1 ficha
     if (req.user.role === 'user') {
       const count = await Ficha.countDocuments({ criadoPor: req.user._id });
       if (count >= 1) return res.status(403).json({ erro: 'Limite de 1 ficha atingido por usuário.' });
-      req.body.status = 'pendente'; // Força pendente para usuários comuns
+      req.body.status = 'pendente';
     }
-
     const novaFicha = new Ficha({ ...req.body, criadoPor: req.user._id });
     await novaFicha.save();
     res.status(201).json(novaFicha);
@@ -148,48 +219,148 @@ app.post('/api/fichas', autenticar, async (req, res) => {
 app.get('/api/fichas', autenticar, async (req, res) => {
   try {
     let filtro = { isAtivo: true };
-    
-    // Regra de Visibilidade:
-    // User só vê a própria. Admin/SuperUser vêm todas as ativas.
-    if (req.user.role === 'user') {
-      filtro.criadoPor = req.user._id;
-    }
+    if (req.user.role === 'user') filtro.criadoPor = req.user._id;
+    if (req.user.role === 'admin' && req.query.incluirInativos === 'true') delete filtro.isAtivo;
 
-    // Admin pode querer ver as inativas (opcional via query string)
-    if (req.user.role === 'admin' && req.query.incluirInativos === 'true') {
-      delete filtro.isAtivo;
-    }
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 0;
+    const skip = (page - 1) * limit;
 
-    const fichas = await Ficha.find(filtro).sort({ nome: 1 });
+    const fichas = await Ficha.find(filtro)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
     res.status(200).json(fichas);
   } catch (erro) {
     res.status(500).json({ erro: 'Erro ao buscar fichas' });
   }
 });
 
+// ROTA DE ATUALIZAÇÃO DE FICHA COM CORREÇÃO DE BUGS E NOTIFICAÇÃO
 app.put('/api/fichas/:id', autenticar, async (req, res) => {
   try {
-    // Busca a ficha primeiro para verificar propriedade
-    const ficha = await Ficha.findById(req.params.id);
-    if (!ficha) return res.status(404).json({ erro: 'Ficha não encontrada' });
+    // Puxamos a ficha antiga e populamos os dados do dono
+    const fichaAntiga = await Ficha.findById(req.params.id).populate('criadoPor');
+    if (!fichaAntiga) return res.status(404).json({ erro: 'Ficha não encontrada' });
 
-    // Regra: User só edita a própria e não pode mudar o Status nem Inscrição (tratado no Flutter)
-    if (req.user.role === 'user' && ficha.criadoPor.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ erro: 'Você não tem permissão para editar esta ficha' });
+    // Trava de segurança para o usuário comum
+    if (req.user.role === 'user' && fichaAntiga.criadoPor._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ erro: 'Sem permissão' });
     }
 
-    const atualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    // --- ESCUDO DE SEGURANÇA (CORREÇÃO DOS BUGS) ---
+    // Impede que as edições do "user" alterem o status ou a inatividade da ficha
+    if (req.user.role === 'user') {
+      delete req.body.status;
+      delete req.body.isAtivo;
+    }
+
+    // Atualizamos a ficha no banco
+    const atualizada = await Ficha.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('criadoPor');
+
+    // --- LÓGICA DE NOTIFICAÇÃO POR E-MAIL ---
+    if (req.user.role !== 'user' && atualizada.criadoPor && atualizada.criadoPor.email) {
+      const statusMudou = fichaAntiga.status !== atualizada.status;
+      const inatividadeMudou = fichaAntiga.isAtivo !== atualizada.isAtivo;
+
+      if (statusMudou || inatividadeMudou) {
+        let mensagemStatus = '';
+
+        if (statusMudou && inatividadeMudou) {
+          mensagemStatus = atualizada.isAtivo
+            ? `foi reativada e teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`
+            : `foi inativada e teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`;
+        } else if (statusMudou) {
+          mensagemStatus = `teve o status alterado para: <b>${atualizada.status.toUpperCase()}</b>`;
+        } else if (inatividadeMudou) {
+          mensagemStatus = atualizada.isAtivo ? 'foi reativada' : 'foi inativada temporariamente';
+        }
+
+        // Dispara o e-mail via Brevo em segundo plano
+        fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'api-key': process.env.BREVO_API_KEY,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            sender: { name: 'App Catequese', email: 'sjocsuporte@gmail.com' },
+            to: [{ email: atualizada.criadoPor.email }],
+            subject: 'Atualização na Ficha - Catequese',
+            htmlContent: `
+              <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                <div style="background-color: #0D47A1; padding: 20px; text-align: center;">
+                  <h2 style="color: white; margin: 0;">App Catequese</h2>
+                </div>
+                <div style="padding: 20px;">
+                  <h3 style="color: #0D47A1;">Olá, ${atualizada.criadoPor.nome}!</h3>
+                  <p>A ficha pastoral do catequizando <b>${atualizada.nome}</b> acabou de ser atualizada.</p>
+                  <p style="font-size: 16px; padding: 10px; background-color: #f5f5f5; border-left: 4px solid #0D47A1;">
+                    A ficha <b>${mensagemStatus}</b>.
+                  </p>
+                  <p>Abra o aplicativo para visualizar os detalhes completos.</p>
+                  <br/>
+                  <p>Fique com Deus,</p>
+                  <p><b>Equipe da Paróquia São José Operário</b></p>
+                </div>
+                <div style="background-color: #f1f1f1; padding: 10px; text-align: center; font-size: 12px; color: #777;">
+                  Este é um e-mail automático. Por favor, não responda.
+                </div>
+              </div>
+            `
+          })
+        }).catch(err => console.error('Falha no envio do e-mail de atualização:', err));
+      }
+    }
+
     res.json(atualizada);
   } catch (e) {
-    res.status(500).json({ erro: 'Erro ao atualizar' });
+    console.error(e);
+    res.status(500).json({ erro: 'Erro ao atualizar ficha' });
   }
 });
 
-// 6. ROTAS DE ADMINISTRAÇÃO (CRUD DE USUÁRIOS)
+app.patch('/api/fichas/:id/inativar', autenticar, async (req, res) => {
+  try {
+    if (req.user.role === 'user') return res.status(403).json({ erro: 'Acesso negado' });
+    await Ficha.findByIdAndUpdate(req.params.id, { isAtivo: false });
+    res.status(200).json({ mensagem: 'Ficha inativada' });
+  } catch (erro) {
+    res.status(500).json({ erro: 'Erro ao inativar' });
+  }
+});
 
+// DELETAR FICHA (Apenas Admin)
+app.delete('/api/fichas/:id', autenticar, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ erro: 'Apenas administradores podem deletar fichas permanentemente' });
+    }
+    const fichaDeletada = await Ficha.findByIdAndDelete(req.params.id);
+    if (!fichaDeletada) {
+      return res.status(404).json({ erro: 'Ficha não encontrada' });
+    }
+    res.json({ mensagem: 'Ficha deletada com sucesso' });
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao deletar ficha' });
+  }
+});
+
+// 7. ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', autenticar, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
-  const users = await User.find().sort({ nome: 1 });
+  if (req.user.role === 'user') return res.status(403).json({ erro: 'Acesso restrito' });
+
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 0;
+  const skip = (page - 1) * limit;
+
+  const users = await User.find()
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+
   res.json(users);
 });
 
@@ -202,10 +373,34 @@ app.post('/api/admin/users', autenticar, async (req, res) => {
     await novoUser.save();
     res.status(201).json(novoUser);
   } catch (e) {
-    res.status(400).json({ erro: 'Erro ao criar usuário interno' });
+    res.status(400).json({ erro: 'Erro ao criar usuário' });
   }
 });
 
-// 7. INICIALIZAÇÃO
+app.put('/api/admin/users/:id', autenticar, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+  try {
+    const { password, ...dados } = req.body;
+    if (password && password.trim() !== '') {
+      dados.password = await bcrypt.hash(password, 10);
+    }
+    const atualizado = await User.findByIdAndUpdate(req.params.id, dados, { new: true });
+    res.json(atualizado);
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao atualizar usuário' });
+  }
+});
+
+app.delete('/api/admin/users/:id', autenticar, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ erro: 'Acesso restrito' });
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ mensagem: 'Usuário deletado' });
+  } catch (e) {
+    res.status(500).json({ erro: 'Erro ao deletar usuário' });
+  }
+});
+
+// 8. INICIALIZAÇÃO
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
