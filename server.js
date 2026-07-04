@@ -258,12 +258,46 @@ app.get('/api/fichas', autenticar, async (req, res) => {
     if (req.user.role === 'user') filtro.criadoPor = req.user._id;
     if (req.user.role === 'admin' && req.query.incluirInativos === 'true') delete filtro.isAtivo;
 
+    const { search, status, sacramento, etapa, catequista, ordenacao } = req.query;
+
+    if (search) {
+      filtro.nome = { $regex: search, $options: 'i' };
+    }
+
+    if (status && status !== 'todos') {
+      filtro.status = status;
+    }
+
+    if (sacramento && sacramento !== 'Todos') {
+      if (sacramento === 'Batismo') filtro.inscricaoBatismo = true;
+      else if (sacramento === 'Crisma') filtro.inscricaoCrisma = true;
+      else if (sacramento === 'Eucaristia') filtro.inscricaoEucaristia = true;
+      else if (sacramento === 'Pré-Catequese') filtro.inscricaoPreCatequese = true;
+      else if (sacramento === 'Noivos') filtro.inscricaoNoivos = true;
+      else if (sacramento === 'Adultos') filtro.inscricaoAdultos = true;
+    }
+
+    if (etapa && etapa !== 'Todas') {
+      filtro.etapa = etapa;
+    }
+
+    if (catequista && catequista !== 'Todos') {
+      filtro.catequistaAtual = catequista;
+    }
+
+    let sortObj = { createdAt: -1 };
+    if (ordenacao === 'nome_az') sortObj = { nome: 1 };
+    else if (ordenacao === 'nome_za') sortObj = { nome: -1 };
+    else if (ordenacao === 'recente') sortObj = { createdAt: -1 };
+    else if (ordenacao === 'antigo') sortObj = { createdAt: 1 };
+
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 0;
+    let limit = parseInt(req.query.limit) || 10;
+    if (limit === 9999) limit = 0; // 0 significa sem limite no mongoose
     const skip = (page - 1) * limit;
 
     const fichas = await Ficha.find(filtro)
-      .sort({ createdAt: -1 })
+      .sort(sortObj)
       .skip(skip)
       .limit(limit);
 
@@ -388,12 +422,39 @@ app.delete('/api/fichas/:id', autenticar, async (req, res) => {
 app.get('/api/admin/users', autenticar, async (req, res) => {
   if (req.user.role === 'user') return res.status(403).json({ erro: 'Acesso restrito' });
 
+  let filtro = {};
+  const { search, role, status, ordenacao } = req.query;
+
+  if (search) {
+    filtro.$or = [
+      { nome: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  if (role && role !== 'todos') {
+    filtro.role = role;
+  }
+
+  if (status === 'ativos') {
+    filtro.isAtivo = true;
+  } else if (status === 'inativos') {
+    filtro.isAtivo = false;
+  }
+
+  let sortObj = { createdAt: -1 };
+  if (ordenacao === 'nome_az') sortObj = { nome: 1 };
+  else if (ordenacao === 'nome_za') sortObj = { nome: -1 };
+  else if (ordenacao === 'data_recente') sortObj = { createdAt: -1 };
+  else if (ordenacao === 'data_antigo') sortObj = { createdAt: 1 };
+
   const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 0;
+  let limit = parseInt(req.query.limit) || 10;
+  if (limit === 9999) limit = 0;
   const skip = (page - 1) * limit;
 
-  const users = await User.find()
-    .sort({ createdAt: -1 })
+  const users = await User.find(filtro)
+    .sort(sortObj)
     .skip(skip)
     .limit(limit);
 
